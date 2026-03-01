@@ -101,9 +101,10 @@ export class AuthService {
 
         await this.sessionRepo.save(this.sessionRepo.create({
             user_id: user.id,
-            refresh_token_Hash: await bcrypt.hash(uuidv4(), 10),
-            device_id: uuidv4(),
+            refresh_token_Hash: await bcrypt.hash(crypto.randomUUID(), 10),
+            device_id: crypto.randomUUID(),
             device_type: DeviceType.WEB,
+            divace_name: null,
             ip_address: ip,
             user_agent: userAgent,
             last_active_at: new Date(),
@@ -114,7 +115,7 @@ export class AuthService {
     }
 
     async validateOAuthLogin(profile: any, provider: SocialiteType): Promise<any> {
-        const { id, emails, displayNmae, photos, _raw } = profile;
+        const { id, emails, displayName, photos, _raw } = profile;
         const email = emails && emails.length > 0 ? emails[0].value : null;
 
         let socialite = await this.socialiteRepo.findOne({ where: { type: provider, ref_id: id }, relations: ['user'] });
@@ -125,8 +126,8 @@ export class AuthService {
         if (!user) {
             user = await this.userRepo.save(this.userRepo.create({
                 email: email || `${id}@${provider}.local`,
-                first_name: displayNmae.split(' ')[0],
-                last_name: displayNmae.split(' ').slice(1).join(' ') || '',
+                first_name: displayName ? displayName.split(' ')[0] : id,
+                last_name: displayName ? displayName.split(' ').slice(1).join(' ') : '',
                 status: UserStatus.ACTIVE,
                 phone_verify_id: '00000000-0000-0000-0000-000000000000',
                 email_verify_id: '0',
@@ -280,8 +281,5 @@ export class AuthService {
 
         return { message: 'Yeni doğrulama kodu gönderildi.' };
     }
-}
-function uuidv4(): any {
-    throw new Error('Function not implemented.');
 }
 

@@ -10,6 +10,7 @@ async function bootstrap() {
     origin: 'http://localhost:3000',
     credentials: true,
   });
+  app.setGlobalPrefix('api');
   const config = new DocumentBuilder()
     .setTitle('Wibesoft E-Ticaret API')
     .setDescription('NestJS Backend Case Study')

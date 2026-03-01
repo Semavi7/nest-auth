@@ -19,10 +19,10 @@ export class UserSession {
     @Column( { type: 'enum', enum: DeviceType} )
     device_type: DeviceType;
 
-    @Column( { type: 'varchar', length: 255 } )
-    divace_name: string;
+    @Column( { type: 'varchar', length: 255, nullable: true } )
+    divace_name: string | null;
 
-    @Column( { type: 'varchar', length: 255 } )
+    @Column( { type: 'varchar', length: 255, nullable: true } )
     ip_address: string;
 
     @Column( { type:'text' } )
@@ -34,8 +34,8 @@ export class UserSession {
     @Column( { type: 'timestamp' } )
     expires_at: Date;
 
-    @Column( { type: 'timestamp' } )
-    revoked_at: Date;
+    @Column( { type: 'timestamp', nullable: true } )
+    revoked_at: Date | null;
 
     @CreateDateColumn( { type: 'timestamp' } )
     created_at: Date;
