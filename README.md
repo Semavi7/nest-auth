@@ -17,6 +17,7 @@ NestJS, TypeORM ve Passport.js ile geliştirilmiş, üretime hazır tam özellik
 - [Swagger Dokümantasyonu](#swagger-dokümantasyonu)
 - [Testler](#testler)
 - [Güvenlik Notları](#güvenlik-notları)
+- [Değişiklik Geçmişi](#değişiklik-geçmişi)
 
 ---
 
@@ -141,11 +142,12 @@ src/
 | `refresh_token_Hash` | varchar | Hashed refresh token |
 | `device_id` | varchar | Cihaz kimliği |
 | `device_type` | enum | `web` \| `ios` \| `android` |
-| `ip_address` | varchar | Oturum açılan IP adresi |
+| `divace_name` | varchar | Cihaz adı (nullable) |
+| `ip_address` | varchar | Oturum açılan IP adresi (nullable) |
 | `user_agent` | text | Tarayıcı/cihaz bilgisi |
 | `last_active_at` | timestamp | Son aktivite zamanı |
 | `expires_at` | timestamp | Oturum bitiş tarihi (7 gün) |
-| `revoked_at` | timestamp | İptal edilme tarihi |
+| `revoked_at` | timestamp | İptal edilme tarihi (nullable) |
 | `created_at` | timestamp | Oluşturulma tarihi |
 
 ### `verify`
@@ -211,36 +213,36 @@ src/
 
 ## API Endpointleri
 
-Tüm endpoint'ler `/auth` prefix'i altındadır. JWT koruması **global** olarak tüm route'lara uygulanır; aşağıdaki endpoint'ler `@Public()` dekoratörü ile açık bırakılmıştır.
+Tüm endpoint'ler `/api/auth` prefix'i altındadır (`/api` global prefix + `/auth` controller prefix). JWT koruması **global** olarak tüm route'lara uygulanır; aşağıdaki endpoint'ler `@Public()` dekoratörü ile açık bırakılmıştır.
 
 ### Kimlik Doğrulama
 
 | Metot | Endpoint | Açıklama |
 |---|---|---|
-| `POST` | `/auth/register` | Email veya telefon ile yeni kullanıcı kaydı oluşturur |
-| `POST` | `/auth/login` | Email veya telefon ile giriş yapar, JWT cookie set eder |
-| `GET` | `/auth/google` | Google OAuth2 akışını başlatır (yönlendirme) |
-| `GET` | `/auth/google/callback` | Google OAuth2 callback URL'i |
+| `POST` | `/api/auth/register` | Email veya telefon ile yeni kullanıcı kaydı oluşturur |
+| `POST` | `/api/auth/login` | Email veya telefon ile giriş yapar, JWT cookie set eder |
+| `GET` | `/api/auth/google` | Google OAuth2 akışını başlatır (yönlendirme) |
+| `GET` | `/api/auth/google/callback` | Google OAuth2 callback URL'i |
 
 ### OTP Doğrulama
 
 | Metot | Endpoint | Açıklama |
 |---|---|---|
-| `POST` | `/auth/verify-account` | 6 haneli OTP kodu ile hesabı aktifleştirir |
-| `POST` | `/auth/resend-verification-otp` | Hesap doğrulama kodunu yeniden gönderir |
+| `POST` | `/api/auth/verify-account` | 6 haneli OTP kodu ile hesabı aktifleştirir |
+| `POST` | `/api/auth/resend-verification-otp` | Hesap doğrulama kodunu yeniden gönderir |
 
 ### Şifre Yönetimi
 
 | Metot | Endpoint | Açıklama |
 |---|---|---|
-| `POST` | `/auth/forget-password` | Şifre sıfırlama OTP'si oluşturur ve gönderir |
-| `POST` | `/auth/reset-password` | OTP kodu ile yeni şifre belirler |
+| `POST` | `/api/auth/forget-password` | Şifre sıfırlama OTP'si oluşturur ve gönderir |
+| `POST` | `/api/auth/reset-password` | OTP kodu ile yeni şifre belirler |
 
 ---
 
 ### İstek / Yanıt Örnekleri
 
-#### POST /auth/register
+#### POST /api/auth/register
 
 ```json
 // İstek (email ile)
@@ -256,7 +258,7 @@ Tüm endpoint'ler `/auth` prefix'i altındadır. JWT koruması **global** olarak
 }
 ```
 
-#### POST /auth/login
+#### POST /api/auth/login
 
 ```json
 // İstek
@@ -266,7 +268,7 @@ Tüm endpoint'ler `/auth` prefix'i altındadır. JWT koruması **global** olarak
 { "message": "Giriş başarılı", "user": { "id": "uuid", "email": "user@example.com", "status": "active" } }
 ```
 
-#### POST /auth/verify-account
+#### POST /api/auth/verify-account
 
 ```json
 // İstek
@@ -276,7 +278,7 @@ Tüm endpoint'ler `/auth` prefix'i altındadır. JWT koruması **global** olarak
 { "message": "Hesabınız başarıyla doğrulandı. Artık giriş yapabilirsiniz." }
 ```
 
-#### POST /auth/forget-password
+#### POST /api/auth/forget-password
 
 ```json
 // İstek
@@ -286,7 +288,7 @@ Tüm endpoint'ler `/auth` prefix'i altındadır. JWT koruması **global** olarak
 { "message": "Şifre sıfırlama kodu gönderildi.", "verify_id": "uuid" }
 ```
 
-#### POST /auth/reset-password
+#### POST /api/auth/reset-password
 
 ```json
 // İstek
@@ -404,10 +406,7 @@ npm install
 # 3. PostgreSQL veritabanını oluştur
 createdb nestjs_auth
 
-# 4. Migration'ları çalıştır (synchronize: false)
-npx typeorm migration:run -d src/common/db/typeorm.config.ts
-
-# 5. Geliştirme modunda başlat
+# 4. Geliştirme modunda başlat (synchronize: true ile şema otomatik oluşturulur)
 npm run start:dev
 ```
 
@@ -452,11 +451,20 @@ npm run test:e2e    # End-to-end testler
 npm run test:cov    # Coverage raporu
 ```
 
+Test dosyaları `test/` dizini altında düzenlenmiştir:
+
 | Dosya | İçerik |
 |---|---|
-| `src/modules/auth/auth.controller.spec.ts` | Controller unit testleri |
-| `src/modules/auth/auth.service.spec.ts` | Service unit testleri |
+| `test/modules/auth/auth.controller.spec.ts` | Controller unit testleri |
+| `test/modules/auth/auth.service.spec.ts` | Service unit testleri |
 | `test/app.e2e-spec.ts` | End-to-end testler |
+
+Jest konfigürasyonu (`package.json`):
+
+- `rootDir`: `.` (proje kökü)
+- `testMatch`: `<rootDir>/test/**/*.spec.ts`
+- `collectCoverageFrom`: `src/**/*.(t|j)s`
+- `coverageDirectory`: `./coverage`
 
 ---
 
@@ -471,6 +479,37 @@ npm run test:cov    # Coverage raporu
 | CORS | Yalnızca `http://localhost:3000` (production'da güncellenmeli) |
 | Soft delete | `deleted_at` ile kullanıcı verileri korunur, fiziksel silinmez |
 | SMS/Email gönderimi | Şu an `console.log` ile simüle edilmektedir — production öncesi Twilio, SendGrid veya AWS SES entegrasyonu yapılmalıdır |
+
+---
+
+## Değişiklik Geçmişi
+
+### [3c2ad81] — 2026-03-01
+
+#### Yeni Özellikler
+
+- **Global API prefix** eklendi: tüm endpoint'ler artık `/api` ön eki ile erişilebilir (ör. `/api/auth/register`)
+
+#### Test Yeniden Yapılandırması
+
+- Controller ve service spec dosyaları `src/modules/auth/` konumundan `test/modules/auth/` konumuna taşındı
+- Jest `rootDir` değeri `.` (proje kökü) olarak güncellendi; `testMatch` artık `test/**/*.spec.ts` kalıbını kullanıyor
+- `collectCoverageFrom` kapsamı `src/**/*.(t|j)s` ile sınırlandırıldı; `coverageDirectory` `./coverage` olarak düzeltildi
+- `test/modules/auth/auth.controller.spec.ts`: tüm controller metotlarını kapsayan kapsamlı birim testleri eklendi
+- `test/modules/auth/auth.service.spec.ts`: `validateUser`, `register`, `login`, `forgetPassword`, `resetPassword`, `verifyAccount` ve `validateOAuthLogin` için kapsamlı servis testleri eklendi
+
+#### Hata Düzeltmeleri
+
+- `crypto.randomUUID()` kullanılarak `uuidv4()` bağımlılığı kaldırıldı (yerleşik Node.js API)
+- `validateOAuthLogin`: `displayNmae` yazım hatası `displayName` olarak düzeltildi; `displayName` için null güvenliği eklendi
+- `@CurrentUser()` dekoratörü imzası düzeltildi: `_data: unknown` parametresi eklendi
+
+#### Veritabanı Şeması
+
+- `user_sessions.divace_name`: `nullable: true` olarak güncellendi (`string | null`)
+- `user_sessions.ip_address`: `nullable: true` olarak güncellendi
+- `user_sessions.revoked_at`: `nullable: true` olarak güncellendi (`Date | null`)
+- TypeORM `synchronize: true` olarak değiştirildi — geliştirme ortamında şema otomatik senkronize edilir
 
 ---
 
