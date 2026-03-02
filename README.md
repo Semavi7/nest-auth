@@ -52,6 +52,7 @@ NestJS, TypeORM ve Passport.js ile geliştirilmiş, üretime hazır tam özellik
 | Doğrulama | class-validator, class-transformer |
 | HTTP Güvenliği | cookie-parser, HttpOnly cookie, CORS |
 | API Dokümantasyonu | @nestjs/swagger (Swagger UI) |
+| SMS | Twilio v5 |
 | Test | Jest, Supertest |
 
 ---
@@ -116,6 +117,12 @@ src/
         ├── mail.service.ts           # SMTP transporter, mail.send-otp event dinleyicisi
         └── events/
             └── send-otp.event.ts     # OTP gönderim eventi: email + code
+
+    └── sms/
+        ├── sms.module.ts             # Modül tanımı: SmsService provider
+        ├── sms.service.ts            # Twilio client, sms.send-otp event dinleyicisi
+        └── events/
+            └── send-sms-otp.event.ts # SMS OTP gönderim eventi: phone + code
 ```
 
 ---
@@ -392,6 +399,11 @@ GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback
 SMTP_HOST=smtp.example.com
 SMTP_USER=no-reply@example.com
 SMTP_PASS=your_smtp_password
+
+# Twilio (SMS)
+TWILIO_ACCOUNT_SID=your_twilio_account_sid
+TWILIO_AUTH_TOKEN=your_twilio_auth_token
+TWILIO_PHONE_NUMBER=+1xxxxxxxxxx
 ```
 
 > **Google OAuth2 kurulumu:** [Google Cloud Console](https://console.cloud.google.com/) üzerinden OAuth 2.0 Client oluşturun ve Yetkili yönlendirme URI'ları kısmına `http://localhost:3000/auth/google/callback` ekleyin.
@@ -490,11 +502,42 @@ Jest konfigürasyonu (`package.json`):
 | CORS | Yalnızca `http://localhost:3000` (production'da güncellenmeli) |
 | Soft delete | `deleted_at` ile kullanıcı verileri korunur, fiziksel silinmez |
 | Email gönderimi | `nodemailer` + SMTP entegrasyonu tamamlandı; `SMTP_HOST/USER/PASS` ortam değişkenleri ile yapılandırılabilir |
-| SMS gönderimi | Şu an `console.log` ile simüle edilmektedir — production öncesi Twilio veya benzer bir servis entegre edilmelidir |
+| SMS gönderimi | `twilio` v5 ile üretim ortamına hazır SMS gönderimi entegre edildi; `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` ortam değişkenleri ile yapılandırılabilir |
 
 ---
 
 ## Değişiklik Geçmişi
+
+### [3410371] — 2026-03-02
+
+#### Yeni Özellikler
+
+- **SMS OTP gönderimi** entegre edildi: `twilio` v5 paketi eklenerek gerçek Twilio API'si üzerinden SMS ile doğrulama ve şifre sıfırlama kodları gönderilebilmektedir
+- **SmsModule / SmsService** oluşturuldu (`src/modules/sms/`): `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` ortam değişkenlerinden client başlatılır; `sms.send-otp` event'ini dinleyerek Twilio Messages API aracılığıyla SMS gönderir
+- **SendSmsOtpEvent** sınıfı eklendi (`src/modules/sms/events/send-sms-otp.event.ts`): `phone` ve `code` alanlarını taşıyan event nesnesi
+- **SmsModule** `app.module.ts`'e dahil edildi
+
+#### Değişiklikler
+
+- **AuthService** — kayıt (`register`), şifre sıfırlama (`forgetPassword`) ve OTP yeniden gönderme (`resendVerificationOtp`) akışlarında SMS kanalı seçildiğinde `sms.send-otp` event'i emit edilmektedir
+- **AuthService** — `channel === VerifyChannel.EMAIL` koşuluna `dto.email` null guard'ı eklendi; SMS dalına `dto.phone` null guard'ı eklendi
+
+#### Ortam Değişkenleri
+
+Yeni eklenen değişkenler `.env.example`'a dahil edildi:
+
+```env
+# Twilio (SMS)
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_PHONE_NUMBER=
+```
+
+#### Güvenlik Notları Güncellemesi
+
+- SMS gönderim notu güncellendi: SMS kanalı artık Twilio v5 ile production'a hazır hale getirildi; `console.log` log satırları debug amaçlı korunmaktadır
+
+---
 
 ### [d694733] — 2026-03-02
 
