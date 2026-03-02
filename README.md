@@ -110,6 +110,12 @@ src/
             ├── jwt.strategy.ts       # Cookie'den JWT okur, payload doğrular
             ├── local.strategy.ts     # Email/şifre doğrulaması
             └── google.strategy.ts    # Google OAuth2 profil doğrulaması
+
+    └── mail/
+        ├── mail.module.ts            # Modül tanımı: MailService provider
+        ├── mail.service.ts           # SMTP transporter, mail.send-otp event dinleyicisi
+        └── events/
+            └── send-otp.event.ts     # OTP gönderim eventi: email + code
 ```
 
 ---
@@ -127,8 +133,8 @@ src/
 | `phone` | varchar | Telefon numarası (nullable) |
 | `password` | varchar | bcrypt ile hashlenmiş şifre (nullable — OAuth kullanıcıları için) |
 | `status` | enum | `active` \| `inactive` \| `pending` \| `suspended` \| `blocked` |
-| `email_verify_id` | bigint | Email doğrulama kaydının referansı |
-| `phone_verify_id` | UUID | Telefon doğrulama kaydının referansı |
+| `email_verify_id` | uuid nullable | Email doğrulama kaydının referansı (doğrulanmamış veya OAuth kullanıcılarda null) |
+| `phone_verify_id` | uuid nullable | Telefon doğrulama kaydının referansı (doğrulanmamış veya OAuth kullanıcılarda null) |
 | `created_at` | timestamp | Oluşturulma tarihi |
 | `updated_at` | timestamp | Güncellenme tarihi |
 | `deleted_at` | timestamp | Soft delete tarihi (nullable) |
@@ -381,6 +387,11 @@ JWT_SECRET=your_super_secret_jwt_key_min_32_chars
 GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your_google_client_secret
 GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback
+
+# Mail (SMTP)
+SMTP_HOST=smtp.example.com
+SMTP_USER=no-reply@example.com
+SMTP_PASS=your_smtp_password
 ```
 
 > **Google OAuth2 kurulumu:** [Google Cloud Console](https://console.cloud.google.com/) üzerinden OAuth 2.0 Client oluşturun ve Yetkili yönlendirme URI'ları kısmına `http://localhost:3000/auth/google/callback` ekleyin.
@@ -478,11 +489,56 @@ Jest konfigürasyonu (`package.json`):
 | OTP geçerlilik süresi | Hesap doğrulama: 5 dk / Şifre sıfırlama: 15 dk |
 | CORS | Yalnızca `http://localhost:3000` (production'da güncellenmeli) |
 | Soft delete | `deleted_at` ile kullanıcı verileri korunur, fiziksel silinmez |
-| SMS/Email gönderimi | Şu an `console.log` ile simüle edilmektedir — production öncesi Twilio, SendGrid veya AWS SES entegrasyonu yapılmalıdır |
+| Email gönderimi | `nodemailer` + SMTP entegrasyonu tamamlandı; `SMTP_HOST/USER/PASS` ortam değişkenleri ile yapılandırılabilir |
+| SMS gönderimi | Şu an `console.log` ile simüle edilmektedir — production öncesi Twilio veya benzer bir servis entegre edilmelidir |
 
 ---
 
 ## Değişiklik Geçmişi
+
+### [d694733] — 2026-03-02
+
+#### Yeni Özellikler
+
+- **Email OTP gönderimi** entegre edildi: `nodemailer` ve `@nestjs/event-emitter` kullanılarak gerçek SMTP üzerinden doğrulama ve şifre sıfırlama kodları email ile gönderilmektedir
+- **MailModule / MailService** oluşturuldu: SMTP bağlantısı `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` ortam değişkenlerinden okunur; `mail.send-otp` event'ini dinleyerek HTML formatlı OTP maili gönderir
+- **SendOtpEvent** sınıfı eklendi (`src/modules/mail/events/send-otp.event.ts`): `email` ve `code` alanlarını taşıyan event nesnesi
+- **EventEmitterModule** `app.module.ts`'e eklendi; tüm modüller arası event-driven iletişim etkinleştirildi
+- **Global ValidationPipe** `main.ts`'e eklendi: `whitelist: true`, `forbidNonWhitelisted: true`, `transform: true` seçenekleriyle DTO doğrulaması güçlendirildi
+- **RegisterLoginResponseDto** oluşturuldu: `plainToInstance` + `@Expose()` ile register ve login yanıtlarında yalnızca izin verilen alanlar (`id`) döndürülmektedir
+
+#### Değişiklikler
+
+- **AuthService** — kayıt, şifre sıfırlama ve OTP yeniden gönderme akışlarında email kanalı seçildiğinde `mail.send-otp` event'i emit edilmektedir; `console.log` simülasyonu korunmaya devam etmektedir
+- **AuthService** — `login()` dönüş anahtarı `access_token` → `accessToken` olarak yeniden adlandırıldı
+- **AuthController** — `register` ve `login` (handleLoginSuccess) yanıtları `plainToInstance(RegisterLoginResponseDto, ...)` ile filtrelenmektedir
+- **AuthController** — login route'undaki fazladan cookie set işlemi kaldırıldı; tüm cookie atama `handleLoginSuccess` metoduna taşındı
+- **ForgetPasswordRequestDto** — kanal artık `email`/`phone` varlığından otomatik belirlenmektedir; `channel` alanı DTO'dan kaldırılmadı ancak service katmanında override edilmektedir
+- **Swagger** — tüm DTO alanlarına (`email`, `phone`, `password`, `code`, `verify_id`, `new_password`, `channel`) `example` değerleri eklendi
+- **Swagger başlığı** — "Wibesoft E-Ticaret API" → "TrendBol E-Ticaret API" olarak güncellendi
+
+#### Veritabanı Şeması
+
+- `users.email_verify_id`: tip `bigint` → `uuid nullable` olarak değiştirildi; varsayılan `'0'` kaldırıldı
+- `users.phone_verify_id`: `nullable: true` olarak güncellendi; varsayılan `'00000000-...'` kaldırıldı
+- OAuth ile oluşturulan kullanıcılarda da `email_verify_id` ve `phone_verify_id` artık `null` olarak kaydedilmektedir
+
+#### Ortam Değişkenleri
+
+Yeni eklenen değişkenler `.env.example`'a dahil edildi:
+
+```env
+# Mail (SMTP)
+SMTP_HOST=
+SMTP_USER=
+SMTP_PASS=
+```
+
+#### Güvenlik Notları Güncellemesi
+
+- SMS/Email gönderim notu güncellendi: Email kanalı için `nodemailer` entegrasyonu production'a hazır hale getirildi; SMS kanalı (Twilio vb.) ilerleyen sürümlerde eklenecektir
+
+---
 
 ### [3c2ad81] — 2026-03-01
 
