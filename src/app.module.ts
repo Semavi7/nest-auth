@@ -7,6 +7,7 @@ import { MailModule } from './modules/mail/mail.module';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { SmsModule } from './modules/sms/sms.module';
 
 @Module({
   imports: [
@@ -14,7 +15,8 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     TypeOrmModule.forRoot(typeOrmConfig),
     EventEmitterModule.forRoot(),
     AuthModule,
-    MailModule
+    MailModule,
+    SmsModule
   ],
   providers: [
     {

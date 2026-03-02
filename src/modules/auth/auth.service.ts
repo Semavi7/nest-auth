@@ -22,6 +22,7 @@ import { ForgetPasswordRequestDto } from './dto/forget-password-request.dto';
 import { ResetPasswordDto } from './dto/reset.password.dto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SendOtpEvent } from '../mail/events/send-otp.event';
+import { SendSmsOtpEvent } from '../sms/events/send-sms-otp.event';
 
 
 @Injectable()
@@ -90,10 +91,15 @@ export class AuthService {
 
         await this.verifyRepo.save(verify);
         
-        if(channel === VerifyChannel.EMAIL){
+        if(channel === VerifyChannel.EMAIL && dto.email){
             this.eventEmitter.emit(
                 'mail.send-otp',
                 new SendOtpEvent(dto.email, otpCode)
+            )
+        } else if(channel === VerifyChannel.SMS && dto.phone) {
+            this.eventEmitter.emit(
+                'sms.send-otp',
+                new SendSmsOtpEvent(dto.phone, otpCode)
             )
         }
         console.log(`[HESAP DOĞRULAMA] Hedef: ${dto.email || dto.phone} | Kod: ${otpCode} | IP: ${ip}`);  
@@ -187,6 +193,11 @@ export class AuthService {
             this.eventEmitter.emit(
                 'mail.send-otp',
                 new SendOtpEvent(dto.email, otpCode)
+            )
+        }else if(channel === VerifyChannel.SMS && dto.phone) {
+            this.eventEmitter.emit(
+                'sms.send-otp',
+                new SendSmsOtpEvent(dto.phone, otpCode)
             )
         }
         console.log(`[ŞİFRE SIFIRLAMA KODU] Hedef: ${dto.email || dto.phone}, Kod: ${otpCode}`);
@@ -295,6 +306,11 @@ export class AuthService {
             this.eventEmitter.emit(
                 'mail.send-otp',
                 new SendOtpEvent(dto.email, otpCode)
+            )
+        }else if(channel === VerifyChannel.SMS && dto.phone) {
+            this.eventEmitter.emit(
+                'sms.send-otp',
+                new SendSmsOtpEvent(dto.phone, otpCode)
             )
         }
         console.log(`[HESAP DOĞRULAMA YENİDEN GÖNDERİLDİ] Hedef: ${dto.email || dto.phone} | Kod: ${otpCode} | IP: ${ip}`);  
