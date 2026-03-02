@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
-import { Repository, IsNull } from 'typeorm';
+import { Repository, IsNull, MoreThan } from 'typeorm';
 import { UserSession } from './entities/user-sessions.entity';
 import { Verify } from './entities/verify.entity';
 import { ForgetPassword } from './entities/forget_password.entity';
@@ -110,23 +110,28 @@ export class AuthService {
         };
     }
 
-    async login(user: User, ip?: string, userAgent?: string): Promise<any> {
-        const payload = { sub: user.id, email: user.email, phone: user.phone };
-        const token = this.jwtService.sign(payload);
-
-        await this.sessionRepo.save(this.sessionRepo.create({
+    async login(user: User, ip?: string, userAgent?: string, deviceInfo?: { device_type?: DeviceType; device_name?: string; device_id?: string }): Promise<any> {
+        const newSession = this.sessionRepo.create({
             user_id: user.id,
-            refresh_token_Hash: await bcrypt.hash(crypto.randomUUID(), 10),
-            device_id: crypto.randomUUID(),
-            device_type: DeviceType.WEB,
-            divace_name: null,
+            device_id: deviceInfo?.device_id ?? crypto.randomUUID(),
+            device_type: deviceInfo?.device_type ?? DeviceType.WEB,
+            divace_name: deviceInfo?.device_name ?? null,
             ip_address: ip,
             user_agent: userAgent,
             last_active_at: new Date(),
-            expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-        }));
+            expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            revoked_at: null,
+        });
 
-        return { accessToken: token, user: user };
+        const session = await this.sessionRepo.save(newSession);
+
+        const accessToken = this.generateAccessToken(user, session.id);
+        const refreshToken = this.generateRefreshToken(user.id, session.id);
+
+        session.refresh_token_Hash = await bcrypt.hash(refreshToken, 10);
+        await this.sessionRepo.save(session);
+
+        return { accessToken, refreshToken, user };
     }
 
     async validateOAuthLogin(profile: any, provider: SocialiteType): Promise<any> {
@@ -317,5 +322,97 @@ export class AuthService {
 
         return { message: 'Yeni doğrulama kodu gönderildi.' };
     }
-}
 
+
+    async refreshToken(token: string): Promise<any> {
+        let payload: any;
+        try {
+            payload = this.jwtService.verify(token, {
+                secret: process.env.JWT_REFRESH_SECRET || 'refresh-secret-key',
+            });
+        } catch {
+            throw new UnauthorizedException('Geçersiz veya süresi dolmuş refresh token.');
+        }
+
+        const session = await this.sessionRepo.findOne({
+            where: { id: payload.sessionId, user_id: payload.sub },
+        });
+
+        if (!session) throw new UnauthorizedException('Oturum bulunamadı.');
+        if (session.revoked_at) throw new UnauthorizedException('Oturum iptal edilmiş.');
+        if (session.expires_at < new Date()) {
+            await this.sessionRepo.remove(session);
+            throw new UnauthorizedException('Oturum süresi dolmuş.');
+        }
+
+        const isValid = await bcrypt.compare(token, session.refresh_token_Hash);
+        if (!isValid) throw new UnauthorizedException('Geçersiz refresh token.');
+
+        const user = await this.userRepo.findOne({ where: { id: payload.sub } });
+        if (!user) throw new NotFoundException('Kullanıcı bulunamadı.');
+
+        const newAccessToken = this.generateAccessToken(user, session.id);
+        const newRefreshToken = this.generateRefreshToken(user.id, session.id);
+
+        session.refresh_token_Hash = await bcrypt.hash(newRefreshToken, 10);
+        session.last_active_at = new Date();
+        await this.sessionRepo.save(session);
+
+        return { accessToken: newAccessToken, refreshToken: newRefreshToken };
+    }
+
+    async logout(sessionId: string): Promise<any> {
+        const session = await this.sessionRepo.findOne({ where: { id: sessionId } });
+        if (!session) throw new NotFoundException('Oturum bulunamadı.');
+
+        session.revoked_at = new Date();
+        await this.sessionRepo.save(session);
+
+        return { message: 'Başarıyla çıkış yapıldı.' };
+    }
+
+    async revokeAllSessions(userId: string): Promise<void> {
+        await this.sessionRepo.update(
+            { user_id: userId, revoked_at: IsNull() },
+            { revoked_at: new Date() },
+        );
+    }
+
+    async validateSession(sessionId: string): Promise<boolean> {
+        const session = await this.sessionRepo.findOne({ where: { id: sessionId } });
+        if (!session) return false;
+        if (session.revoked_at) return false;
+        if (session.expires_at < new Date()) return false;
+        return true;
+    }
+
+    async updateLastActive(sessionId: string): Promise<void> {
+        await this.sessionRepo.update({ id: sessionId }, { last_active_at: new Date() });
+    }
+
+    async getActiveSessions(userId: string): Promise<any[]> {
+        return this.sessionRepo.find({
+            where: {
+                user_id: userId,
+                revoked_at: IsNull(),
+                expires_at: MoreThan(new Date()),
+            },
+            select: ['id', 'device_type', 'divace_name', 'last_active_at', 'expires_at', 'ip_address', 'created_at'],
+            order: { last_active_at: 'DESC' },
+        });
+    }
+
+    private generateAccessToken(user: User, sessionId: string): string {
+        return this.jwtService.sign(
+            { sub: user.id, email: user.email, phone: user.phone, sessionId },
+            { secret: process.env.JWT_SECRET || 'super-secret-key', expiresIn: '15m' },
+        );
+    }
+
+    private generateRefreshToken(userId: string, sessionId: string): string {
+        return this.jwtService.sign(
+            { sub: userId, sessionId },
+            { secret: process.env.JWT_REFRESH_SECRET || 'refresh-secret-key', expiresIn: '7d' },
+        );
+    }
+}

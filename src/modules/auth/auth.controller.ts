@@ -1,4 +1,4 @@
-import {Controller, Get, Post, Body, Patch, Param, Delete, Req, HttpCode, Res, UseGuards} from '@nestjs/common';
+import {Controller, Get, Post, Body, Req, HttpCode, HttpStatus, Res, UseGuards, UnauthorizedException} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { Public } from './decorators/public.decorator';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -35,7 +35,11 @@ export class AuthController {
   @ApiOperation({ summary: 'Email veya Telefon ile Giriş Yap' })
   async login(@Req() req: Request, @Body() dto: RegisterLoginDto, @Res({ passthrough: true }) res: Response) {
     const user = await this.authService.validateUser(dto);
-    return this.handleLoginSuccess(user, req, res);
+    return this.handleLoginSuccess(user, req, res, {
+      device_type: dto.device_type,
+      device_name: dto.device_name,
+      device_id: dto.device_id,
+    });
   }
 
   @Public()
@@ -68,6 +72,34 @@ export class AuthController {
   }
 
   @Public()
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Access Token Yenile' })
+  async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const token = (req as any).cookies?.RefreshToken;
+    if (!token) throw new UnauthorizedException('Refresh token bulunamadı.');
+    const { accessToken, refreshToken } = await this.authService.refreshToken(token);
+    this.setTokenCookies(res, accessToken, refreshToken);
+    return { message: 'Token yenilendi.' };
+  }
+
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Çıkış Yap' })
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const result = await this.authService.logout((req as any).user.sessionId);
+    res.clearCookie('Authentication');
+    res.clearCookie('RefreshToken');
+    return result;
+  }
+
+  @Get('sessions')
+  @ApiOperation({ summary: 'Aktif Oturumları Listele' })
+  async sessions(@Req() req: Request) {
+    return this.authService.getActiveSessions((req as any).user.userId);
+  }
+
+  @Public()
   @Post('verify-account')
   @ApiOperation({ summary: 'Hesabı OTP ile Doğrula (Aktifleştir)' })
   async verifyAccount(@Body() dto: VerifyAccountDto) {
@@ -81,15 +113,23 @@ export class AuthController {
     return this.authService.resendVerificationOtp(dto , req.ip, req.headers['user-agent']);
   }
 
-  private async handleLoginSuccess(user: any, req: Request, res: Response) {
-    const { accessToken, user: userData } = await this.authService.login(user, req.ip, req.headers['user-agent']);
-    res.cookie('Authentication', accessToken, {
-      httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 24 * 60 * 60 * 1000 
-    });
+  private async handleLoginSuccess(user: any, req: Request, res: Response, deviceInfo?: { device_type?: any; device_name?: string; device_id?: string }) {
+    const { accessToken, refreshToken, user: userData } = await this.authService.login(user, req.ip, req.headers['user-agent'], deviceInfo);
+    this.setTokenCookies(res, accessToken, refreshToken);
     return { 
       message: 'Giriş başarılı',
       user: plainToInstance(RegisterLoginResponseDto, userData, { excludeExtraneousValues: true }) 
     };
+  }
+
+  private setTokenCookies(res: Response, accessToken: string, refreshToken: string) {
+    const isProd = process.env.NODE_ENV === 'production';
+    res.cookie('Authentication', accessToken, {
+      httpOnly: true, secure: isProd, sameSite: 'strict', maxAge: 15 * 60 * 1000,
+    });
+    res.cookie('RefreshToken', refreshToken, {
+      httpOnly: true, secure: isProd, sameSite: 'strict', maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
   }
 
 }
