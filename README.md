@@ -234,6 +234,9 @@ Tüm endpoint'ler `/api/auth` prefix'i altındadır (`/api` global prefix + `/au
 |---|---|---|
 | `POST` | `/api/auth/register` | Email veya telefon ile yeni kullanıcı kaydı oluşturur |
 | `POST` | `/api/auth/login` | Email veya telefon ile giriş yapar, JWT cookie set eder |
+| `POST` | `/api/auth/refresh` | Refresh token ile yeni access & refresh token çifti üretir |
+| `POST` | `/api/auth/logout` | Mevcut oturumu iptal eder, cookie'leri temizler (korumalı) |
+| `GET` | `/api/auth/sessions` | Kullanıcının aktif oturumlarını listeler (korumalı) |
 | `GET` | `/api/auth/google` | Google OAuth2 akışını başlatır (yönlendirme) |
 | `GET` | `/api/auth/google/callback` | Google OAuth2 callback URL'i |
 
@@ -275,10 +278,45 @@ Tüm endpoint'ler `/api/auth` prefix'i altındadır (`/api` global prefix + `/au
 
 ```json
 // İstek
-{ "email": "user@example.com", "password": "gizli123" }
+{ "email": "user@example.com", "password": "gizli123", "device_type": "web", "device_name": "Chrome / Windows", "device_id": "uuid-from-client-storage" }
 
-// Yanıt 200 OK  —  Set-Cookie: Authentication=<jwt>; HttpOnly; SameSite=Strict
+// Yanıt 200 OK
+// Set-Cookie: Authentication=<access_token>; HttpOnly; SameSite=Strict; MaxAge=900
+// Set-Cookie: RefreshToken=<refresh_token>; HttpOnly; SameSite=Strict; MaxAge=604800
 { "message": "Giriş başarılı", "user": { "id": "uuid", "email": "user@example.com", "status": "active" } }
+```
+
+#### POST /api/auth/refresh
+
+```json
+// Yanıt 200 OK  (RefreshToken cookie otomatik okunur)
+// Set-Cookie: Authentication=<new_access_token>; HttpOnly; ...
+// Set-Cookie: RefreshToken=<new_refresh_token>; HttpOnly; ...
+{ "message": "Token yenilendi." }
+```
+
+#### POST /api/auth/logout
+
+```json
+// Yanıt 200 OK  (Authentication cookie otomatik okunur)
+{ "message": "Başarıyla çıkış yapıldı." }
+```
+
+#### GET /api/auth/sessions
+
+```json
+// Yanıt 200 OK
+[
+  {
+    "id": "uuid",
+    "device_type": "web",
+    "divace_name": "Chrome / Windows",
+    "ip_address": "127.0.0.1",
+    "last_active_at": "2026-03-02T14:00:00.000Z",
+    "expires_at": "2026-03-09T14:00:00.000Z",
+    "created_at": "2026-03-02T14:00:00.000Z"
+  }
+]
 ```
 
 #### POST /api/auth/verify-account
@@ -357,16 +395,30 @@ GET /auth/google/callback  (Google tarafından çağrılır)
   └─ JWT cookie set edilir → http://localhost:3000/dashboard adresine yönlendirilir
 ```
 
-### 4. JWT Cookie Akışı
+### 4. JWT & Refresh Token Akışı
 
 ```
 Giriş sonrası:
-  Set-Cookie: Authentication=<jwt>; HttpOnly; SameSite=Strict; MaxAge=86400
+  Set-Cookie: Authentication=<access_token>; HttpOnly; SameSite=Strict; MaxAge=900     (15 dk)
+  Set-Cookie: RefreshToken=<refresh_token>; HttpOnly; SameSite=Strict; MaxAge=604800   (7 gün)
 
 Korumalı endpoint isteği:
   JwtStrategy  → Authentication cookie'den token extract eder
   JwtAuthGuard → token doğrular; @Public() olan route'ları atlar
-  @CurrentUser() → { userId, email } döner
+               → validateSession() ile oturum geçerliliği kontrol edilir
+               → updateLastActive() ile last_active_at güncellenir
+  @CurrentUser() → { userId, email, sessionId } döner
+
+Token yenileme (access token süresi dolduğunda):
+  POST /api/auth/refresh  (RefreshToken cookie otomatik okunur)
+    → Token imzası ve oturum geçerliliği doğrulanır
+    → Yeni access & refresh token üretilir (Rotation)
+    → Oturumdaki refresh_token_Hash güncellenir
+
+Çıkış:
+  POST /api/auth/logout
+    → session.revoked_at set edilir
+    → Her iki cookie temizlenir
 ```
 
 ---
@@ -389,6 +441,7 @@ DB_NAME=nestjs_auth
 
 # JWT
 JWT_SECRET=your_super_secret_jwt_key_min_32_chars
+JWT_REFRESH_SECRET=your_super_secret_refresh_key_min_32_chars
 
 # Google OAuth2
 GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
@@ -496,7 +549,9 @@ Jest konfigürasyonu (`package.json`):
 | Konu | Uygulama |
 |---|---|
 | Şifre saklama | bcrypt (salt rounds: 10) |
-| Token iletimi | HttpOnly + SameSite=Strict cookie (production'da Secure=true) |
+| Token iletimi | HttpOnly + SameSite=Strict cookie (production'da Secure=true); access 15 dk, refresh 7 gün |
+| Refresh token rotation | Her yenilemede hash güncellenir; sızdırılmış token 2. kullanımda geçersiz sayılır |
+| Oturum iptali | `revoked_at` damgasıyla kalıcı kayıt; JwtAuthGuard her istekte oturum geçerliliğini doğrular |
 | OTP deneme limiti | Max 5 yanlış deneme → kod otomatik geçersiz kılınır |
 | OTP geçerlilik süresi | Hesap doğrulama: 5 dk / Şifre sıfırlama: 15 dk |
 | CORS | Yalnızca `http://localhost:3000` (production'da güncellenmeli) |
@@ -507,6 +562,53 @@ Jest konfigürasyonu (`package.json`):
 ---
 
 ## Değişiklik Geçmişi
+
+### [4b3846d] — 2026-03-02
+
+#### Yeni Özellikler
+
+- **Refresh token mekanizması** eklendi: Access token artık 15 dakika, refresh token 7 gün geçerliliğe sahiptir; tokenlar ayrı `JWT_SECRET` / `JWT_REFRESH_SECRET` anahtarlarıyla imzalanmaktadır
+- **`POST /api/auth/refresh`** endpoint'i eklendi: `RefreshToken` cookie'sinden token alınır, imza ve oturum geçerliliği doğrulandıktan sonra yeni access & refresh token çifti döner (Rotation stratejisi)
+- **`POST /api/auth/logout`** endpoint'i eklendi: Mevcut oturum için `revoked_at` set edilir ve her iki cookie temizlenir
+- **`GET /api/auth/sessions`** endpoint'i eklendi (korumalı): Kullanıcının iptal edilmemiş, süresi dolmamış aktif oturumlarını listeler
+- **Cihaz bilgisi takibi** güçlendirildi: `RegisterLoginDto`'ya opsiyonel `device_type`, `device_name`, `device_id` alanları eklendi; login sırasında sunulan cihaz bilgisi oturum kaydında saklanmaktadır
+- **`setTokenCookies` yardımcı metodu** eklendi: `Authentication` ve `RefreshToken` cookie'lerini merkezi olarak yöneten private metot; login ve token yenileme akışlarında kullanılmaktadır
+
+#### Değişiklikler
+
+- **AuthService.login()** — artık `deviceInfo` parametresi alır; oturum kaydını istemciden gelen cihaz bilgileriyle oluşturur; hem `accessToken` hem de `refreshToken` (refresh token hash'lenerek oturumda saklanır) döndürür
+- **AuthService** — `generateAccessToken()` ve `generateRefreshToken()` private metodları oluşturuldu; payload ve imzalama ayrıştırıldı; access token payload'ına `sessionId` eklendi
+- **AuthService** — `refreshToken()`, `logout()`, `revokeAllSessions()`, `validateSession()`, `updateLastActive()`, `getActiveSessions()` metodları eklendi
+- **JwtAuthGuard** — `AuthService` inject edildi; `canActivate` `async` yapıldı; JWT doğrulamasının ardından `validateSession()` ile oturum geçerliliği kontrol edilmekte ve `updateLastActive()` ile son aktivite güncellenmektedir
+- **JwtStrategy.validate()** — döndürülen payload'a `sessionId` alanı eklendi; tüm korumalı handler'larda `req.user.sessionId` erişilebilir hale geldi
+- **AuthController.login()** — cihaz bilgileri `handleLoginSuccess`'e iletilmektedir
+- **`handleLoginSuccess`** — `deviceInfo` parametresi kabul edecek şekilde güncellendi; `setTokenCookies` çağrısı eklendi
+
+#### API Endpointleri Güncellemesi
+
+| Metot | Endpoint | Açıklama |
+|---|---|---|
+| `POST` | `/api/auth/refresh` | Refresh token ile yeni access & refresh token çifti üretir |
+| `POST` | `/api/auth/logout` | Mevcut oturumu iptal eder, cookie'leri temizler |
+| `GET` | `/api/auth/sessions` | Kullanıcının aktif oturumlarını listeler (korumalı) |
+
+#### Ortam Değişkenleri
+
+Yeni eklenen değişkenler `.env`'e dahil edilmelidir:
+
+```env
+# JWT
+JWT_REFRESH_SECRET=your_super_secret_refresh_key_min_32_chars
+```
+
+#### Güvenlik Notları Güncellemesi
+
+- `Authentication` cookie ömrü **24 saat** → **15 dakika** olarak düşürüldü
+- `RefreshToken` cookie **7 gün** ömürlü, aynı güvenlik bayrakları (`HttpOnly`, `SameSite=Strict`, production'da `Secure`) ile set edilmektedir
+- Refresh token rotation uygulandı: her yenilemede mevcut token hash güncellenir; sızdırılmış token ikinci kullanımda geçersiz sayılır
+- Oturum iptali `revoked_at` damgası ile kalıcı olarak kaydedilir
+
+---
 
 ### [3410371] — 2026-03-02
 
