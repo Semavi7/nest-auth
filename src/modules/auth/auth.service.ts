@@ -20,6 +20,8 @@ import { DeviceType } from './enums/auth.device-type.enum';
 import { SocialiteType } from './enums/auth.socialite-type.enum';
 import { ForgetPasswordRequestDto } from './dto/forget-password-request.dto';
 import { ResetPasswordDto } from './dto/reset.password.dto';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { SendOtpEvent } from '../mail/events/send-otp.event';
 
 
 @Injectable()
@@ -30,7 +32,8 @@ export class AuthService {
         @InjectRepository(Verify) private verifyRepo: Repository<Verify>,
         @InjectRepository(ForgetPassword) private forgetPasswordRepo: Repository<ForgetPassword>,
         @InjectRepository(Socialite) private socialiteRepo: Repository<Socialite>,
-        private jwtService: JwtService
+        private jwtService: JwtService,
+        private eventEmitter: EventEmitter2
     ){}
 
     async validateUser(dto: RegisterLoginDto): Promise<User> {
@@ -66,8 +69,8 @@ export class AuthService {
             first_name: null,
             last_name: null,
             status: UserStatus.PENDING,
-            phone_verify_id: '00000000-0000-0000-0000-000000000000',
-            email_verify_id: '0'
+            phone_verify_id: null,
+            email_verify_id: null
         });
 
         await this.userRepo.save(user);
@@ -86,7 +89,13 @@ export class AuthService {
         });
 
         await this.verifyRepo.save(verify);
-        //TODO: SMS veya Email gönderme işlemi yapılacak
+        
+        if(channel === VerifyChannel.EMAIL){
+            this.eventEmitter.emit(
+                'mail.send-otp',
+                new SendOtpEvent(dto.email, otpCode)
+            )
+        }
         console.log(`[HESAP DOĞRULAMA] Hedef: ${dto.email || dto.phone} | Kod: ${otpCode} | IP: ${ip}`);  
 
         return { 
@@ -111,7 +120,7 @@ export class AuthService {
             expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
         }));
 
-        return { access_token: token, user: user };
+        return { accessToken: token, user: user };
     }
 
     async validateOAuthLogin(profile: any, provider: SocialiteType): Promise<any> {
@@ -129,8 +138,8 @@ export class AuthService {
                 first_name: displayName ? displayName.split(' ')[0] : id,
                 last_name: displayName ? displayName.split(' ').slice(1).join(' ') : '',
                 status: UserStatus.ACTIVE,
-                phone_verify_id: '00000000-0000-0000-0000-000000000000',
-                email_verify_id: '0',
+                phone_verify_id: null,
+                email_verify_id: null,
                 password: null
             }));
         }
@@ -156,9 +165,10 @@ export class AuthService {
         
         const otpCode = crypto.randomInt(100000, 999999).toString();
         const expireDate = new Date(Date.now() + 15 * 60 * 1000);
+        const channel = dto.email ? VerifyChannel.EMAIL : VerifyChannel.SMS;
 
         const verify = await this.verifyRepo.save(this.verifyRepo.create({
-            channel: dto.channel,
+            channel: channel,
             type: VerifyType.FORGET_PASSWORD,
             user_id: user.id,
             code: otpCode,
@@ -173,7 +183,12 @@ export class AuthService {
             verify_id: verify.id
         }));
 
-        //TODO: SMS veya Email gönderme işlemi yapılacak
+       if(channel === VerifyChannel.EMAIL && dto.email){
+            this.eventEmitter.emit(
+                'mail.send-otp',
+                new SendOtpEvent(dto.email, otpCode)
+            )
+        }
         console.log(`[ŞİFRE SIFIRLAMA KODU] Hedef: ${dto.email || dto.phone}, Kod: ${otpCode}`);
 
         return { message: 'Şifre sıfırlama kodu gönderildi.', verify_id: verify.id };
@@ -276,7 +291,12 @@ export class AuthService {
         });
 
         await this.verifyRepo.save(verify);
-        //TODO: SMS veya Email gönderme işlemi yapılacak
+        if(channel === VerifyChannel.EMAIL && dto.email){
+            this.eventEmitter.emit(
+                'mail.send-otp',
+                new SendOtpEvent(dto.email, otpCode)
+            )
+        }
         console.log(`[HESAP DOĞRULAMA YENİDEN GÖNDERİLDİ] Hedef: ${dto.email || dto.phone} | Kod: ${otpCode} | IP: ${ip}`);  
 
         return { message: 'Yeni doğrulama kodu gönderildi.' };

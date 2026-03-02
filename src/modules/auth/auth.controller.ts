@@ -10,6 +10,8 @@ import { GoogleAuthGuard } from './guards/google-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { ForgetPasswordRequestDto } from './dto/forget-password-request.dto';
 import { ResetPasswordDto } from './dto/reset.password.dto';
+import { plainToInstance } from 'class-transformer';
+import { RegisterLoginResponseDto } from './dto/register-login-response.dto';
 
 @ApiTags('Identity & Authentication')
 @Controller('auth')
@@ -19,8 +21,12 @@ export class AuthController {
   @Public()
   @Post('register')
   @ApiOperation({ summary: 'Email veya Telefon ile Kayıt Ol' })
-  async register(@Body() dto: any, @Req() req: Request) {
-    return this.authService.register(dto, req.ip, req.headers['user-agent']);
+  async register(@Body() dto: RegisterLoginDto, @Req() req: Request) {
+    const { message, user: userData } = await this.authService.register(dto, req.ip, req.headers['user-agent']);
+    return { 
+      message, 
+      user: plainToInstance(RegisterLoginResponseDto, userData, { excludeExtraneousValues: true }) 
+    };
   }
 
   @Public()
@@ -29,11 +35,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Email veya Telefon ile Giriş Yap' })
   async login(@Req() req: Request, @Body() dto: RegisterLoginDto, @Res({ passthrough: true }) res: Response) {
     const user = await this.authService.validateUser(dto);
-    const { accessToken, user: userData } = await this.authService.login(user, req.ip, req.headers['user-agent']);
-    res.cookie('Authentication', accessToken, {
-      httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 24 * 60 * 60 * 1000 
-    });
-    return this.handleLoginSuccess(userData, req, res);
+    return this.handleLoginSuccess(user, req, res);
   }
 
   @Public()
@@ -53,12 +55,14 @@ export class AuthController {
 
   @Public()
   @Post('forget-password')
+  @ApiOperation({ summary: 'Şifre Sıfırlama Talebi Oluştur' })
   async forgetPassword(@Req() req: Request, @Body() dto: ForgetPasswordRequestDto) {
     return this.authService.forgetPassword(dto, req.ip, req.headers['user-agent']);
   }
 
   @Public()
   @Post('reset-password')
+  @ApiOperation({ summary: 'Yeni Şifre Belirle' })
   async resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
   }
@@ -82,7 +86,10 @@ export class AuthController {
     res.cookie('Authentication', accessToken, {
       httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 24 * 60 * 60 * 1000 
     });
-    return { message: 'Giriş başarılı', user: userData };
+    return { 
+      message: 'Giriş başarılı',
+      user: plainToInstance(RegisterLoginResponseDto, userData, { excludeExtraneousValues: true }) 
+    };
   }
 
 }

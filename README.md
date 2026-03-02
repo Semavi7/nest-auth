@@ -436,7 +436,7 @@ Uygulama çalışırken:
 http://localhost:3000/api
 ```
 
-- **Başlık:** Wibesoft E-Ticaret API
+- **Başlık:** TrendBol E-Ticaret API
 - **Versiyon:** 1.0
 - Bearer Auth desteği ile korumalı endpoint'leri Swagger UI üzerinden test edebilirsiniz
 - Tüm endpoint'ler, DTO şemaları ve enum değerleri otomatik belgelenir

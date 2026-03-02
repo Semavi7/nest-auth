@@ -29,11 +29,11 @@ export class User {
     @Column({ type: 'enum', enum: UserStatus, default: UserStatus.ACTIVE })
     status: UserStatus;
 
-    @Column({ type: 'uuid'})
-    phone_verify_id: string;
+    @Column({ type: 'uuid', nullable: true })
+    phone_verify_id: string | null;
 
-    @Column({ type: 'bigint' })
-    email_verify_id: string;
+    @Column({ type: 'uuid', nullable: true })
+    email_verify_id: string | null;
 
     @CreateDateColumn({ type: 'timestamp' })
     created_at: Date;

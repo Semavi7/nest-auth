@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import cookieParser from 'cookie-parser';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { ValidationPipe } from '@nestjs/common';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -11,8 +12,13 @@ async function bootstrap() {
     credentials: true,
   });
   app.setGlobalPrefix('api');
+  app.useGlobalPipes(new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true
+  }));
   const config = new DocumentBuilder()
-    .setTitle('Wibesoft E-Ticaret API')
+    .setTitle('TrendBol E-Ticaret API')
     .setDescription('NestJS Backend Case Study')
     .setVersion('1.0')
     .addBearerAuth()

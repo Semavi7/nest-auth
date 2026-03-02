@@ -2,17 +2,17 @@ import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { IsEmail, IsPhoneNumber, IsString, Length, ValidateIf } from "class-validator";
 
 export class VerifyAccountDto {
-    @ApiPropertyOptional()
+    @ApiPropertyOptional({ example: 'john.doe@example.com' })
     @ValidateIf(o => !o.phone)
     @IsEmail()
     email?: string;
 
-    @ApiPropertyOptional()
+    @ApiPropertyOptional({ example: '+905321234567' })
     @ValidateIf(o => !o.email)
     @IsPhoneNumber()
     phone?: string;
 
-    @ApiProperty()
+    @ApiProperty({ example: '482931' })
     @IsString()
     @Length(6, 6, { message: 'Doğrulama kodu 6 haneli olmalıdır.' })
     code: string;
